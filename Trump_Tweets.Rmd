@@ -1,0 +1,144 @@
+---
+title: "Analysing Trump Tweets"
+author: "Mick"
+date: "4/24/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,message = FALSE,error=FALSE)
+
+library(ggplot2)
+library(dplyr)
+library(anytime)
+library(flextable)
+library(dlookr)
+library(scales)
+library(tm)
+library(wordcloud)
+```
+
+## Analysing Trump Tweets
+
+### Data Loading
+
+```{r}
+rm(list=ls())
+df <- read.csv("./Analysing-Trump-Tweets.csv")
+tw <- df %>% select(content:mentions)
+tw$Ymd <- as.Date(tw$date)
+```
+
+### 1. Visualize the number of retweets and favorites in a single chart over time 
+
+```{r}
+ggplot(tw) + geom_line(aes(x=Ymd,y=retweets,col="retweets")) +
+  geom_line(aes(x=Ymd,y=favorites,col="favorites")) +
+  scale_y_continuous(labels=comma) +
+  labs(title="Title Here") +
+  scale_x_date(
+    NULL,
+    breaks = scales::breaks_width("1 years"), 
+    labels = scales::label_date("'%Y")
+  ) + theme_grey()
+```
+
+### 2. Run a correlation between retweets and favorites 
+
+```{r}
+ggplot(tw) + geom_point(aes(x=favorites,y=retweets)) +
+  scale_y_continuous(labels=comma) +
+  scale_x_continuous(labels = comma) +
+  geom_smooth(aes(x=favorites,y=retweets),method="lm") +
+    theme_linedraw()
+```
+
+### 3. Count the number of characters in each tweet and create a new variable / column in the data frame you store it. 
+
+```{r}
+tw$Charactors <- nchar(df$content,allowNA =FALSE)
+summary(tw$Charactors)
+```
+
+### 4. Run a correlation between character count and retweet count 
+
+```{r}
+ggplot(tw) + geom_point(aes(x=Charactors,y=retweets)) +
+  scale_y_continuous(labels=comma) +
+  scale_x_continuous(labels = comma) +
+  geom_smooth(aes(x=Charactors,y=retweets),method="lm") +
+    theme_linedraw()
+```
+
+### 5. Run a correlation between character count and favorites  
+
+```{r}
+ggplot(tw) + geom_point(aes(x=Charactors,y=favorites)) +
+  scale_y_continuous(labels=comma) +
+  scale_x_continuous(labels = comma) +
+  geom_smooth(aes(x=Charactors,y=favorites),method="lm") +
+    theme_linedraw()
+```
+
+#### dlookr
+
+```{r}
+dlookr::diagnose_numeric(tw) %>% flextable::flextable()
+```
+
+### 6. Create a new "mentioned" factor variable / column when "mentions" is empty (NA) and 1 otherwise.  Remember that TRUE equals 1 and "FALSE" equals 0 
+
+```{r}
+tw$mentioned <- ifelse(tw$mentions != "", 1,0)
+table(tw$mentioned)
+```
+
+### 7. Find the median of the retweets and roll them.  Create a new variable "RTgroup" Tweets with median-1 (eg 850-1 = <849) will be "low" (0) and median + (> = 850) "high" (1). 
+
+```{r}
+tw$RTGroup <- ifelse(tw$retweets <= 560 -1, 0,1)
+tw$RTGroup <- ifelse(tw$retweets >= 550 +1, 1,0)
+summary(tw$RTGroup)
+```
+
+### 8. Cross tabulate these two variables and run the chi-square test.  Visualize and interpret. 
+
+```{r}
+xtab <- table(tw$RTGroup,tw$mentioned)
+plot(xtab)
+chisq.test(xtab)
+```
+
+### 8. Bonus Question 
+#### Text Mining with TM package
+
+```{r}
+mycorpus <- Corpus(VectorSource(tw$content))
+mycorpus <- tm_map(mycorpus,removeWords,stopwords())
+remove_url <- function(x)gsub("www[^[:space:]]*","",x)
+mycorpus <- tm_map(mycorpus,content_transformer(remove_url))
+remove_url1 <- function(x)gsub("http[^[:space:]]*","",x)
+mycorpus <- tm_map(mycorpus,content_transformer(remove_url1))
+
+dtm <- DocumentTermMatrix(mycorpus)
+terms <-dtm$dimnames$Terms 
+head(terms)
+```
+#### Count Terms
+
+```{r}
+terms_df <- as.data.frame(terms)
+terms_count <- terms_df %>% group_by(terms) %>%
+  summarise(Count = n())
+```
+```{r}
+tw$Source <- gsub('@',"",tw$mentions)
+count_src <- tw %>% filter(mentions !="") %>% group_by(Source) %>%
+  summarise(Count = n()) %>% top_n(20)
+```
+
+
+```{r}
+count_src <- as.data.frame(count_src)
+  ggplot(count_src) + geom_col(aes(x=Count,y=Source))
+```
